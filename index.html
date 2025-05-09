@@ -1,69 +1,110 @@
-html
 <!DOCTYPE html>
 <html lang="ru">
-  <head>
-    <meta charset="UTF-8" />
-    <title>WebSocket Заказы</title>
-    <style>
-      body {
-        font-family: sans-serif;
-        margin: 20px;
+<head>
+  <meta charset="UTF-8" />
+  <title>WebSocket Заказы</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      margin: 20px;
+    }
+    #orders {
+      margin-top: 20px;
+    }
+    .order {
+      border: 1px solid #ccc;
+      padding: 10px;
+      margin-bottom: 10px;
+      border-radius: 6px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Новые заказы через WebSocket</h1>
+  <div id="status">🔄 Подключение...</div>
+  <div id="orders"></div>
+
+  <script>
+    const statusEl = document.getElementById("status");
+    const ordersEl = document.getElementById("orders");
+
+    const token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoxLCJyb2xlIjoiYWRtaW4iLCJleHAiOjE3NDcwODAxMDd9.UQE3q-bp2MAwIn6QzDDvHZAm1xvwywmdJy2rinECJ9M";
+
+    const ordersMap = new Map();
+
+    function renderOrder(order) {
+      const existing = document.querySelector(`.order[data-id="${order.id}"]`);
+
+      // сохраняем в память
+      ordersMap.set(order.id, order);
+
+      const html = `
+        <strong>Заказ #${order.id}</strong><br>
+        Статус: ${order.status || "не указан"}<br>
+        Доставка: ${order.delivery_type || "—"}<br>
+        Оплата: ${order.payment_type || "—"}<br>
+        Сумма: ${order.total}<br>
+        Имя: ${order.name || "—"}<br>
+        Адрес: ${order.address || "—"}<br>
+        Время: ${order.created_at || "—"}
+      `;
+
+      if (existing) {
+        existing.innerHTML = html;
+      } else {
+        const div = document.createElement("div");
+        div.className = "order";
+        div.setAttribute("data-id", order.id);
+        div.innerHTML = html;
+        ordersEl.prepend(div);
       }
-      #orders {
-        margin-top: 20px;
-      }
-      .order {
-        border: 1px solid #ccc;
-        padding: 10px;
-        margin-bottom: 10px;
-        border-radius: 6px;
-      }
-    </style>
-  </head>
-  <body>
-    <h1>Новые заказы через WebSocket</h1>
-    <div id="status">🔄 Подключение...</div>
-    <div id="orders"></div>
+    }
 
-    <script>
-      const statusEl = document.getElementById("status");
-      const ordersEl = document.getElementById("orders");
-
-      // WebSocket через защищённый протокол wss
-      const socket = new WebSocket("wss://chechnya-product.ru/ws/orders");
-
-      socket.onopen = () => {
-        statusEl.textContent = "✅ Подключено к WebSocket";
-      };
-
-      socket.onclose = () => {
-        statusEl.textContent = "❌ Соединение закрыто";
-      };
-
-      socket.onerror = (err) => {
-        statusEl.textContent = "⚠ Ошибка WebSocket";
-        console.error("WebSocket error:", err);
-      };
-
-      socket.onmessage = (event) => {
-        const message = JSON.parse(event.data);
-        console.log(message);
-
-        if (message.type === "new_order" || message.type === "status_update") {
-          const order = message.order;
-          const div = document.createElement("div");
-          div.className = "order";
-          div.innerHTML = `
-          <strong>Заказ #${order.id}</strong><br>
-          Статус: ${order.status || "не указан"}<br>
-          Доставка: ${order.delivery_type || "—"}<br>
-          Оплата: ${order.payment_type || "—"}<br>
-          Сумма: ${order.total}<br>
-          Время: ${order.created_at}
-        `;
-          ordersEl.prepend(div);
+    fetch("https://chechnya-product.ru/api/admin/orders", {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error("Ошибка при загрузке заказов");
+        return response.json();
+      })
+      .then((data) => {
+        if (Array.isArray(data.data)) {
+          data.data.reverse().forEach((order) => renderOrder(order));
         }
-      };
-    </script>
-  </body>
+      })
+      .catch((err) => {
+        statusEl.textContent = "⚠ Ошибка загрузки заказов";
+        console.error("API error:", err);
+      });
+
+    const socket = new WebSocket("wss://chechnya-product.ru/ws/orders");
+
+    socket.onopen = () => {
+      statusEl.textContent = "✅ Подключено к WebSocket";
+    };
+
+    socket.onclose = () => {
+      statusEl.textContent = "❌ Соединение закрыто";
+    };
+
+    socket.onerror = (err) => {
+      statusEl.textContent = "⚠ Ошибка WebSocket";
+      console.error("WebSocket error:", err);
+    };
+
+    socket.onmessage = (event) => {
+      try {
+        const message = JSON.parse(event.data);
+        if (message.type === "new_order" || message.type === "status_update") {
+          const newOrder = message.order;
+          const existing = ordersMap.get(newOrder.id);
+          const mergedOrder = { ...(existing || {}), ...newOrder };
+          renderOrder(mergedOrder);
+        }
+      } catch (e) {
+        console.error("Ошибка обработки сообщения:", e);
+      }
+    };
+  </script>
+</body>
 </html>
